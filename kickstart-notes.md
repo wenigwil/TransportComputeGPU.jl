@@ -13,8 +13,8 @@
 
 - `CUDA.CUSOLVER.heevjBatched!` is **H**ermitian Matrix **J**acobi based **E**igen **V**alue **D**ecomposition which comes from the `CUSOLVER` library [here](https://docs.nvidia.com/cuda/cusolver/index.html#cusolverdn-t-syevjbatched)
 
-    > [!CAUTION]
-    > What is batching?
+> [!CAUTION]
+> What is batching?
 
 ## Questions
 
