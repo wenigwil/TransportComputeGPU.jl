@@ -4,7 +4,7 @@
 >[!IMPORTANT]
 > Changed `nqs=500000` in the `test_diag_dynmats`-function
 > 
-> Ran on a GeForce GTX 1060 with 6 GB
+> Ran on a GeForce GTX 1060 with 6 GB and Intel i5-7500 with 3.8 GHz
 
 
 ~~~txt
