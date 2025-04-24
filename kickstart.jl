@@ -21,8 +21,8 @@ function diag_dynmats_gpu(dynmats)
     #https://github.com/JuliaGPU/CUDA.jl/blob/master/lib/cusolver/dense.jl
     CUDA.@sync sols = CUDA.CUSOLVER.heevjBatched!('V', 'U', dynmats)
 
-    #Only seems to work on floats
-    #CUDA.@sync sols = CUDA.CUSOLVER.syevjBatched!('V', 'U', dynmats)
+    # Only seems to work on floats
+    # CUDA.@sync sols = CUDA.CUSOLVER.syevjBatched!('V', 'U', dynmats)
 end
 
 function calc_phases(rs, q)
@@ -50,7 +50,7 @@ end
 function test_diag_dynmats()
     #Multithreaded CPU diagonalization of the dynamical matrix
 
-    nqs = 1000000
+    nqs = 500000
     natoms = 1
     nbands = 3*natoms
 
@@ -94,7 +94,7 @@ function test_calc_phases_gpu()
 end
 
 function test_diag_dynmats_gpu()
-    nqs = 1000000 #gpu won't be able to handle more
+    nqs = 500000 #gpu won't be able to handle more
     natoms = 1
     nbands = 3*natoms
 
