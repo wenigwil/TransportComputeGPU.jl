@@ -1,4 +1,3 @@
-include("./src/phonon.jl")
+include("../src/phonon.jl")
 
-
-Phonon.sayhello()
+Phonon.read_ifc2("../examples/espresso.ifc2", "./array.txt")
