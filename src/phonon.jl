@@ -1,6 +1,6 @@
 module Phonon
 
-import Statistics
+import Logging
 
 """
     read_ifc2(ifc2_path::String, ebinput_path::String)
@@ -34,19 +34,21 @@ function read_ifc2(ifc2_path::String, ebinput_path::String)
     nat = convert(Int16, nat)
     ibrav = convert(Int16, ibrav)
 
+    Logging.@debug "readifc2() First line read..." nat ntype ibrav celldm
+
     # TODO Deal with the special ibrav=0 case
 
     # NEXT ntype LINE(S)
+    # ntype are the number species of atoms
     mass = Vector{Float64}(undef, ntype)
     label = Array{String}(undef, ntype)
     for i = 1:ntype
         temp = split(readline(ifc2_file))
-        println(temp)
         label[i] = chop(temp[2], head = 1, tail = 1)
         mass[i] = parse(Float64, temp[3])
-        println(label)
-        println(mass)
     end
+
+    Logging.@debug "readifc2() Next $ntype line(s) read..." mass label
 
     # NEXT nat LINE(S)
     # From these lines we get which species (tipo) sits on which basis 
@@ -55,17 +57,18 @@ function read_ifc2(ifc2_path::String, ebinput_path::String)
     basis_pos = Matrix{Float64}(undef, (nat, 3))
     for i = 1:nat
         temp = split(readline(ifc2_file))
-        println(temp)
         tipo[i] = parse(Int16, temp[2])
         basis_pos[i, :] = parse.(Float64, temp[3:end])
     end
-    println(basis_pos)
-    println(tipo)
+
+    Logging.@debug "readifc2() Next $nat line(s) read..." tipo basis_pos
 
     # NEXT LINE
     # Is the material a polar one?
     polar_key = split(readline(ifc2_file))[1]
-    println(polar_key)
+
+    Logging.@debug "readifc2() Next 1 line read..." polar_key
+
     if polar_key == "T"
         # NEXT 3 LINES
         # Read the dielectric tensor
@@ -74,7 +77,7 @@ function read_ifc2(ifc2_path::String, ebinput_path::String)
             dielectric_tensor[i, :] =
                 parse.(Float64, split(readline(ifc2_file)))
         end
-        println(dielectric_tensor)
+        Logging.@debug "readifc2() Next 3 lines read... Dielectric Tensor" dielectric_tensor
 
         # NEXT 4*nat LINES
         # Read the Born effective charges
@@ -86,13 +89,14 @@ function read_ifc2(ifc2_path::String, ebinput_path::String)
                 zeff[i, j, :] = parse.(Float64, split(readline(ifc2_file)))
             end
         end
+        Logging.@debug "readifc2() Next $(4*nat) lines read... Born-Eff. Charges" zeff
     end
 
     # NEXT LINE
     # Read the super cell sizes
     qcell = parse.(Int32, split(readline(ifc2_file)))
-    println(qcell)
-
+    Logging.@debug "readifc2() Next 1 line read... Super Cell Size" qcell
+    Logging.@debug
     # NEXT 3*3*nat*nat*( qcell[1]*qcell[2]*qcell[3] + 1 ) lines
     # First we define the number of force-constant-supercell-fields 
     nfc2 = 3 * 3 * nat * nat
@@ -126,14 +130,6 @@ function read_ifc2(ifc2_path::String, ebinput_path::String)
     end
 
     close(ifc2_file)
-
-    # Verbose output
-    # for i = 1:size(zeff)[1]
-    #     println("zeff[$(i)]=", i)
-    #     for j = 1:size(zeff)[2]
-    #         println(zeff[i, j, :])
-    #     end
-    # end
 end
 
 end
