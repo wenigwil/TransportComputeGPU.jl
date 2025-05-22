@@ -1,3 +1,5 @@
+import Logging
+
 include("../../src/parsers.jl")
 
 # eb_namelists = Parsers.ebInputData("../../examples/input.nml", 3, 4)
@@ -9,4 +11,6 @@ include("../../src/parsers.jl")
 #     println(k, " = ", v)
 # end
 
-Parsers.ebInputData("./../../examples/input.nml")
+data = Parsers.ebInputData("./../../examples/input.nml")
+
+
