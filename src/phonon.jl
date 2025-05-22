@@ -6,12 +6,15 @@ import Logging
     read_ifc2(ifc2_path::String, ebinput_path::String)
 
 Read a Quantum-Espresso-ifc2-output file into a force constant tensor.
-
-The function needs to read a corresponding elphbolt-input file for crystals
-information as well.
 """
-function read_ifc2(ifc2_path::String, ebinput_path::String)
-    # TODO Check that files exist
+function read_qe_ifc2(ifc2_path::String)
+    # Check that file exists
+    if isfile(ifc2_path) == false
+        Logging.@error "Given path is not a regular file!"
+        return
+    else
+        Logging.@debug "Given path is a regular file" ifc2_path
+    end
 
     # Reading the header
     ifc2_file = open(ifc2_path)
@@ -37,6 +40,9 @@ function read_ifc2(ifc2_path::String, ebinput_path::String)
     Logging.@debug "readifc2() First line read..." nat ntype ibrav celldm
 
     # TODO Deal with the special ibrav=0 case
+    # For this we have to find out what quantum espresso prints into the 
+    # ifc2-output file in that case... 15 year old forums may suggest a 
+    # solution lol
 
     # NEXT ntype LINE(S)
     # ntype are the number species of atoms
@@ -96,15 +102,20 @@ function read_ifc2(ifc2_path::String, ebinput_path::String)
     # Read the super cell sizes
     qcell = parse.(Int32, split(readline(ifc2_file)))
     Logging.@debug "readifc2() Next 1 line read... Super Cell Size" qcell
-    Logging.@debug
+
     # NEXT 3*3*nat*nat*( qcell[1]*qcell[2]*qcell[3] + 1 ) lines
     # First we define the number of force-constant-supercell-fields 
     nfc2 = 3 * 3 * nat * nat
     no_qcells = qcell[1] * qcell[2] * qcell[3]
 
     # Allocating the force tensor
-    ifc2_tensor =
-        Array{Float64}(undef, (3, 3, nat, nat, qcell[1], qcell[2], qcell[3]))
+    ifc2_tensor_dims = (3, 3, nat, nat, qcell[1], qcell[2], qcell[3])
+    ifc2_tensor = Array{Float64}(undef, ifc2_tensor_dims)
+
+    Logging.@debug """
+    Allocated the force-constant tensor with following dimensions
+    ifc2_tensor_dims = (3, 3, nat, nat, qcell[1], qcell[2], qcell[3])\n
+    """ ifc2_tensor_dims
 
     # Reading the force constant-tensor.
     for i = 1:nfc2
@@ -132,4 +143,18 @@ function read_ifc2(ifc2_path::String, ebinput_path::String)
     close(ifc2_file)
 end
 
+# function read_eb_input(input_path::String)
+#     # Check that files exist
+#     if isfile(input_path)==false
+#         Logging.@error "read_eb_input() Given path is not a regular file!"
+#         return
+#     else
+#         Logging.@debug "read_eb_input() Given path is a regular file" input_path
+#     end
+#
+#
+# end
+#
+
+# End of module Phonon
 end
