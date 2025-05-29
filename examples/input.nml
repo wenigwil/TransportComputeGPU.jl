@@ -8,8 +8,8 @@
 	elements = "Si"
         atomtypes = 1 1
 	DIB = .true. !Use dominant isotope mass for phonon ground state calculation
-	lattvecs(:,1) =  -0.27010011   0.00000000   0.27010011
         lattvecs(:,2) =   0.00000000   0.27010011   0.27010011
+	lattvecs(:,1) =  -0.27010011   0.00000000   0.27010011
         lattvecs(:,3) =  -0.27010011   0.27010011   0.00000000   
         basis(:,1) =    0.00 0.00 0.00
         basis(:,2) =    0.25 0.25 0.25
