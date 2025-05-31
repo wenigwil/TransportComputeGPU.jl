@@ -1,3 +1,19 @@
+#=
+  ____                                    
+ |  _ \  __ _  _ __  ___   ___  _ __  ___
+ | |_) |/ _` || '__|/ __| / _ \| '__|/ __|
+ |  __/| (_| || |   \__ \|  __/| |   \__ \
+ |_|    \__,_||_|   |___/ \___||_|   |___/                        
+==========================================
+
+This file contains the Parsers module in which objects for holding
+data are defined in! Each object will correspond to a file from an
+external application such as elphbolt, Quantum Espresso or similar.
+The constructors (inner and outer) of the objects are used to parse
+the file that they belong to. This is mostly for convenience when
+accessing data and modularization...
+=#
+
 module Parsers
 
 import Logging
@@ -278,7 +294,7 @@ function init_crystal_info!(ci::AbstractDict, numelements::Integer, numatoms::In
     ci["born"] = Array{Float64}(undef, (3, 3, numatoms))
     ci["epsilon"] = Array{Float64}(undef, (3, 3))
 
-    # This one is falsely labeled on the elphbolt github page
+    # This one is labeled on the elphbolt github page as a Real
     ci["read_epsiloninf"] = false
 
     ci["epsiloninf"] = 0.0
@@ -328,6 +344,172 @@ function init_numerics!(nu::AbstractDict)
     nu["use_Wannier_ifc2s"] = false
     nu["solve_bulk"] = true
     nu["solve_nano"] = false
+end
+
+"""
+    dfpt_qeOutputData(output_file_path::String)
+
+Type for the output data of a Quantum Espresso DFPT
+calculation that is read-in from an output file at output_file_path.
+"""
+struct dfpt_qeOutputData
+    output_file::AbstractString
+    properties::Dict
+
+    function dfpt_qeOutputData(output_file_path::String)
+        # Check that file exists
+        if isfile(output_file_path) == false
+            Logging.@error "Inner dfpt_qeOD-constructor: Given path is not a regular file!"
+            return
+        else
+            Logging.@debug "Inner dfpt_qeOD-constructor: Given path is a regular file" output_file_path
+        end
+
+        # Reading the header
+        output_file = open(output_file_path)
+
+        # FIRST LINE
+        # Reading number of species (ntype), number of atoms (nat), type of 
+        # bravais lattice (?) (ibrav), and a vector of cell dimensions (celldm)
+        celldm = Vector{Float64}(undef, 6)
+        ntype,
+        nat,
+        ibrav,
+        celldm[1],
+        celldm[2],
+        celldm[3],
+        celldm[4],
+        celldm[5],
+        celldm[6] = parse.(Float64, split(readline(output_file)))
+        # Convert to Ints so we can loop over them
+        ntype = convert(Int16, ntype)
+        nat = convert(Int16, nat)
+        ibrav = convert(Int16, ibrav)
+
+        Logging.@debug "readifc2() First line read..." nat ntype ibrav celldm
+
+        # TODO Deal with the special ibrav=0 case
+        # For this we have to find out what quantum espresso prints into the 
+        # ifc2-output file in that case... 15 year old forums may suggest a 
+        # solution lol
+
+        # NEXT ntype LINE(S)
+        # ntype are the number species of atoms
+        mass = Vector{Float64}(undef, ntype)
+        label = Array{String}(undef, ntype)
+        for i = 1:ntype
+            temp = split(readline(output_file))
+            label[i] = chop(temp[2], head = 1, tail = 1)
+            mass[i] = parse(Float64, temp[3])
+        end
+
+        Logging.@debug "readifc2() Next $ntype line(s) read..." mass label
+
+        # NEXT nat LINE(S)
+        # From these lines we get which species (tipo) sits on which basis 
+        # position (basis_pos)
+        tipo = Vector{Int16}(undef, nat)
+        basis_pos = Matrix{Float64}(undef, (nat, 3))
+        for i = 1:nat
+            temp = split(readline(output_file))
+            tipo[i] = parse(Int16, temp[2])
+            basis_pos[i, :] = parse.(Float64, temp[3:end])
+        end
+
+        Logging.@debug "readifc2() Next $nat line(s) read..." tipo basis_pos
+
+        # NEXT LINE
+        # Is the material a polar one?
+        polar_key = split(readline(output_file))[1]
+
+        Logging.@debug "readifc2() Next 1 line read..." polar_key
+
+        if polar_key == "T"
+            # NEXT 3 LINES
+            # Read the dielectric tensor
+            dielectric_tensor = Matrix{Float64}(undef, (3, 3))
+            for i = 1:3
+                dielectric_tensor[i, :] = parse.(Float64, split(readline(output_file)))
+            end
+            Logging.@debug "readifc2() Next 3 lines read... Dielectric Tensor" dielectric_tensor
+
+            # NEXT 4*nat LINES
+            # Read the Born effective charges
+            zeff = Array{Float64}(undef, (nat, 3, 3))
+            for i = 1:nat
+                # We are not reading the first index. We already know that
+                readline(output_file)
+                for j = 1:3
+                    zeff[i, j, :] = parse.(Float64, split(readline(output_file)))
+                end
+            end
+            Logging.@debug "readifc2() Next $(4*nat) lines read... Born-Eff. Charges" zeff
+        end
+
+        # NEXT LINE
+        # Read the super cell sizes
+        qcell = parse.(Int32, split(readline(output_file)))
+        Logging.@debug "readifc2() Next 1 line read... Super Cell Size" qcell
+
+        # NEXT 3*3*nat*nat*( qcell[1]*qcell[2]*qcell[3] + 1 ) lines
+        # First we define the number of force-constant-supercell-fields 
+        nfc2 = 3 * 3 * nat * nat
+        no_qcells = qcell[1] * qcell[2] * qcell[3]
+
+        # Allocating the force tensor
+        ifc2_tensor_dims = (3, 3, nat, nat, qcell[1], qcell[2], qcell[3])
+        ifc2_tensor = Array{Float64}(undef, ifc2_tensor_dims)
+
+        Logging.@debug """
+        Allocated the force-constant tensor with following dimensions
+        ifc2_tensor_dims = (3, 3, nat, nat, qcell[1], qcell[2], qcell[3])\n
+        """ ifc2_tensor_dims
+
+        # Reading the force constant-tensor.
+        for i = 1:nfc2
+            # Reading the atom displacements and atom/species addresses
+            i_displ, j_displ, i_at_addr, j_at_addr =
+                parse.(Int64, split(readline(output_file)))
+
+            # Reading the supercell coordinates and actual ifc2-tensor elements
+            for j = 1:no_qcells
+                temp = split(readline(output_file))
+
+                i_qcell, j_qcell, k_qcell = parse.(Int64, temp[1:(end - 1)])
+                ifc2_tensor[
+                    i_displ,
+                    j_displ,
+                    i_at_addr,
+                    j_at_addr,
+                    i_qcell,
+                    j_qcell,
+                    k_qcell,
+                ] = parse(Float64, temp[end])
+            end
+        end
+        close(output_file)
+
+        # Create the properties dictionary for storing the read-in data
+        properties = Dict{String,Any}()
+
+        # Assign the read-in data to the properties dictionary
+        properties["numelements"] = ntype
+        properties["numatoms"] = nat
+        properties["ibrav"] = ibrav
+        properties["celldm"] = celldm
+        properties["masses"] = mass
+        properties["label"] = label
+        properties["tipo"] = tipo
+        properties["basis"] = basis_pos
+        properties["polar"] = polar_key
+        properties["epsilon"] = dielectric_tensor
+        properties["born"] = zeff
+        properties["qcell"] = qcell
+        properties["ifc2"] = ifc2_tensor
+
+        # Advise the constructor to return a dfpt_qeOutputData-object
+        new(output_file_path, properties)
+    end
 end
 
 # End of module Parsers

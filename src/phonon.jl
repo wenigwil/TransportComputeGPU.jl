@@ -136,25 +136,15 @@ function read_qe_ifc2(ifc2_path::String)
                 i_qcell,
                 j_qcell,
                 k_qcell,
-            ] = parse(Float64, temp[4])
+            ] = parse(Float64, temp[end])
         end
     end
 
     close(ifc2_file)
+
+    return ifc2_tensor
 end
 
-# function read_eb_input(input_path::String)
-#     # Check that files exist
-#     if isfile(input_path)==false
-#         Logging.@error "read_eb_input() Given path is not a regular file!"
-#         return
-#     else
-#         Logging.@debug "read_eb_input() Given path is a regular file" input_path
-#     end
-#
-#
-# end
-#
 
 # End of module Phonon
 end
