@@ -3,6 +3,94 @@
 This is a place for notes on the `phonon.f90` which is located at 
 `elphbolt/src/`.
 
+## types
+
+### phonon
+
+- **`prefix = 'ph'`** *`string`*
+    - prefix for identifying particle type
+- **`scell(3)`** *`integer`*
+    - number of unitcells in the supercell used for DFPT or finite 
+      displacement methods
+- **`ifc3(:,:,:,:)`** *`array of floats`*
+    - 3rd order force constant tensor with (probably) muxed indices
+- **`numrtiplets`** *`integer`*
+    - number of triplets in the ifc3-file
+    - triplets in the sense analogous to 2nd order force constant atom 
+      pairs
+- **`R_j(:,:), R_k(:,:)`** *`array of floats`*
+    - positions of the 2nd and 3rd unitcell in the supercell for an ifc3 
+      triplet
+- **`Index_i(:), Index_j(:), Index_k(:)`** *`vector of integers`*
+    - labels of primitive cell atoms in the ifc3 triplet
+- **`simplex_squared_evals`** *`array of floats`*
+    - simplex (???) vertices filled with squared eigenvalues
+    - i don't understand any part of this yet
+- **`cg_indexlist_irred(:)`** *`vector of integers`*
+    - probably a list with group theory contents
+- **`cg_indexlist`** *`vector of integers`*
+    - probably a list with group theory contents
+- **`cgset_indexlist_irred(:)`** *`vector of integers`*
+    - probably a list with group theory contents
+- **`cgset_indexlist`** *`vector of integers`*
+    - probably a list with group theory contents
+- **`ifc2(:,:,:,:,:,:,:)`** *`array of floats`*
+    - 2nd order force constant tensor
+- **`rws(124,0:3)`** *`array of floats`*
+    - positions of supercells from stretched lattice vectors of the 
+      unitcell
+    - stretched by `scell(:)` 
+    - supercells are part of a fixed `5x5x5` super-supercell
+- **`cell_r(1:3, 0:3)`** *`array of floats`*
+    - transposed `crys%lattvecs` (lattvecs are put into inputfile in 
+      nanometers) and converted to units of bohr ( by *dividing* with 
+      `bohr2nm`)
+    - columns of `cell_r` are the cartesian axis and rows number the 
+      lattice vectors
+    - IMPORTANT: first columns denotes the length of the vector
+- **`cell_g(1:3, 0:3)`** *`array of floats`*
+    - analogous to `cell_r`
+    - transposed of `crys%reclattvecs` which are computed from the 
+      `crys%lattvecs`
+    - converted from 1/nm to 1/bohr (by multiplying with bohr2nm)
+    - first column contains the length of the vector
+- **`mm(:,:)`** *`array of floats`*
+    - symmetric matrix that contains all masses of all atoms in the 
+      unitcell (by the counts of basis vectors *not* species) on the 
+      diagonal
+    - off-diagonal elements contain the mass factors (sqrt(mi * mj)) of all 
+      atom combinations
+- **`rr(:,:,:)`** *`array of floats`*
+    - tensor that holds the difference of all atom positions in the unit 
+      cell
+    - can be thought of as a matrix of vectors. Diagonal is the zero-vector
+    - off-diagonal elements are the difference in atom positions in the 
+      unitcell (for 2 atoms in the unitcell this is of shape *2x2*x3)
+- **`ws_cell(:, :)`** *`array of integers`*
+    - IMPORTANT: this is *easily* (bad naming) mistaken for `wscell(3)` 
+      which contains the numbers of unitcell in the supercell copied from 
+      the qe-ifc2-file!!! **This is something else!**
+    - takes part in the `dynmat`-symmetry restore process (`wsweights`)
+- **`ws_weight(:)`** *`array of floats`*
+    - contains the computed `weight` corresponding to each unitcell in the 
+      super-supercell
+    - length should be `5*5*5*wscell(1)*wscell(2)*wscell(3)` (big numba)
+
+## initialize
+
+This `subroutine` is said to initialize the phonon data type, calculate 
+*ground state* phonon properties and read ifc3 data.
+
+
+
+## phonon_espresso_precompute
+
+## phonon_espresso
+
+
+
+## calculate_phonons
+
 
 ## read_ifc2
 
@@ -35,9 +123,9 @@ with meaning while going through the script
 - `ibrav`: ???
 - `ipol`: temp `ifc2` tensor location index 1
 - `jpol`: temp `ifc2` tensor location index 2
-- `m1`:
-- `m2`:
-- `m3`:
+- `m1`: iterator for the number of supercells in the super-supercell
+- `m2`: iterator for the number of supercells in the super-supercell
+- `m3`: iterator for the number of supercells in the super-supercell
 - `ntype`: number of atomic species
 - `nat`: number of atoms in the basis
 - `nfc2`: number of force constants 3*3*`nat`*`nat`
@@ -45,13 +133,14 @@ with meaning while going through the script
 #### 64 bit floating
 
 - `r(crys%numatoms, 3)`: relative coordinates for each atom in basis
-- `wscell(3,0:3)`:
+- `wscell(3,0:3)`: stretched unitcell lattice vectors. Supercell lattice 
+  vectors
 - `celldm(6)`: vector of cell dimensions (why 6d?)
 - `at(3,3)`: ???
 - `mass(crys%numelements)`: mass for each atomic species
 - `zeff(crys%numatoms, 3, 3)`: born effective charges
 - `eps(3, 3)`: dielectric tensor
-- `dnrm2`:
+- `dnrm2`: LAPACK for euclidean norm of a vector
 - `massfactor`: species mass conversion factor
 
 #### Characters
@@ -153,7 +242,8 @@ self%scell = qscell
 ~~~
 
 >[!CAUTION]
-> Why copy `qscell` to `scell`?
+> Why copy `qscell` to `scell`? **ANSWER: `scell` is the number of unit 
+> cells, the supercell is made up of! `scell` is used later at step 12**
 
 8. Allocate the `ifc2` tensor of rank 7 and store the number of force 
    constants
@@ -205,4 +295,83 @@ end do
 > as far as I can tell. It is probably not that import in this part because 
 > the subroutine should just read in the file. But still weird.
 
+
+11. Grab reciprocal and direct lattice vectors, convert them to nanometers 
+    and save them into arrays. The lattice vectors are stored in columns. 
+    Rows goes through the 3 dimensions. The 0-column denotes the length of 
+    the lattice vectors
+
+~~~fortran
+self%cell_r(:, 1:3) = transpose(crys%lattvecs)/bohr2nm
+do i = 1, 3
+   self%cell_r(i, 0) = dnrm2(3, self%cell_r(i, 1:3), 1)
+end do
+self%cell_g(:, 1:3) = transpose(crys%reclattvecs)*bohr2nm
+do i = 1, 3
+   self%cell_g(i, 0) = dnrm2(3, self%cell_g(i, 1:3), 1)
+end do
+~~~
+
+12. stretch the unitcell lattice vector by the number of unitcells in each 
+    direction which make up the supercell (`scell` contains the number of 
+    unit cells in each of the lattice vector directions)
+
+~~~fortran
+wscell(1,1:3) = self%cell_r(1,1:3)*self%scell(1)
+wscell(2,1:3) = self%cell_r(2,1:3)*self%scell(2)
+wscell(3,1:3) = self%cell_r(3,1:3)*self%scell(3)
+~~~
+
+13. The supercell is made up of unitcells. Now we build data corresponding 
+    to a super-supercell that is made up of 5 supercells in each lattice 
+    vector (stretched and contained in `wscell`-array) direction. We are 
+    storing all vectors that point to a specific supercell in the 
+    super-supercell (columns `1:3` of `self%rws`) AND *half of their 
+    squared lengths* (column `0`).
+
+~~~fortran
+j = 1
+do m1 = -2, 2
+   do m2 = -2, 2
+      do m3 = -2, 2
+         if(all((/m1, m2, m3/).eq.0)) then
+            cycle
+         end if
+         do i = 1, 3
+            self%rws(j, i) = wscell(1, i)*m1 + wscell(2, i)*m2 + wscell(3, i)*m3
+         end do
+         self%rws(j, 0) = 0.5*dot_product(self%rws(j, 1:3), self%rws(j, 1:3))
+         j = j + 1
+      end do
+   end do
+end do
+~~~
+
+14. We are building symmetric matrices. They hold **a)** Masses and Mass 
+    factors (`self%mm`). Diagonal is the mass of atom `i`. All other 
+    elements are the mass factors of atoms `i` and `j`. **b)** Distances 
+    between atom `i` and `j` (`self%rr`). Diagonal is `0`.
+
+~~~fortran
+do i = 1, nat
+   self%mm(i, i) = mass(tipo(i))
+   self%rr(i, i, :) = 0
+   do j = i + 1, nat
+      self%mm(i, j) = sqrt(mass(tipo(i))*mass(tipo(j)))
+      self%rr(i, j, 1:3) = r(i, 1:3) - r(j, 1:3)
+      self%mm(j, i) = self%mm(i, j)
+      self%rr(j, i, 1:3) = -self%rr(i, j, 1:3)
+   end do
+end do
+~~~
+
+## read_ifc3
+
+## deallocate_phonon_quantities
+
+## save_xmassvar
+
+## allocate_xmassvar
+
+## clean_xmassvar
 

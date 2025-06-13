@@ -54,6 +54,7 @@ for a in xrange(3):
 - `cell`: contains all sorts of information about the crystal
     - `len(cell[1])` is the number of atoms
     - `a_i = cell[0][i]` probably lattice constants
+    - `cell[0][iat]` position of atom `iat` 
 - `numq`: number of q-points
 - `natoms`: number of atoms
 - `scell`: probably super-cell information container
@@ -133,8 +134,14 @@ for m1,m2,m3 in it.product(
     ):
 ~~~
 
-4. 
+4. convert the iteration integers `m1`, `m2`, `m3` into crystal coordinates
 
+~~~python
+t = np.dot([m1,m2,m3],system.lvec)
+~~~
+
+5. translate the vector that points from atom j to atom i in the unit cell 
+   into 
 
 
 
