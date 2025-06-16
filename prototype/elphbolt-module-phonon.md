@@ -301,6 +301,7 @@ end do
 if(j == 0) then
   weight = 1.0_r64/dble(deg)
 end if
+self%ws_weight(counter) = self%ws_weight(counter) + weight
 ~~~
 
 6. The specifics about the `mod(A,P)` function are 
@@ -314,15 +315,47 @@ end if
    implementation which is due to the freedom of convention. In Fortran the 
    `mod`-function is not implemented *clock-like*. A clock-like 
    `mod`-function will always return values between `0` and `P`, whereas 
-   Fortrans `mod-function` will return values between `-P` and `P`, which 
-   will be symmetric about the sign of `A`. This implementation fuses the 
-   functionality of a regular clock and a clock that counts *negative* time 
-   but still displays the same numbers after each period as the regular 
-   clock. This is practical because we want to wrap vectors back into a 
-   cell (at symmetric around an origin) for which their components not need 
-   to be positive. The dummy variables `m1, m2, m3` are non-cartesian 
-   postions of unitcells in the a ultracell. `self%scell` is a copy from 
-   the ifc2-file of the number of unit cells in a supercell. 
+   Fortrans `mod`-functions' return values have `-P < 0` for `A<0` and `0 > 
+   P` for `A>0`. The dummy variables `m1, m2, m3` are non-cartesian 
+   postions of unitcells in the ultracell. `self%scell` is a copy from the 
+   ifc2-file of the number of unit cells in a supercell in each lattice 
+   vector direction.
+
+   This code is inside the loop over all atom pair combinations for all 
+   unitcell positions and only takes place for `r_ws` on or inside some 
+   voronoi plane. We muxed the tuple `(iat, jat, m1, m2, m3)` into a number 
+   which is `counter`. Know after we have gone through a `weight` 
+   assignement for an `r_ws` we will save a new unitcell position in 
+   crystal coordinates. This new unitcell position is saved at 
+   `self%ws_cell(:,counter)` and is calculated modulo the *supercell*. The 
+   Fortran `mod`-function works not clock-like but is converted into 
+   clock-like modulo with an if-statement below that adds (`mod(A,P)`) `P` 
+   in the case for `A<=0`.
+
+   For some intellectual reason we shift Fortrans `mod`-function here on 
+   never fold back into the origin unitcell. This will probably clear up in 
+   the `phonon_espresso_precompute()`-subroutine.
+
+
+~~~fortran
+if(weight > 0.0_r64) then
+  self%ws_cell(1, counter) = mod(m1 + 1, self%scell(1))
+  if(self%ws_cell(1, counter) <= 0) then
+     self%ws_cell(1, counter) = self%ws_cell(1, counter) + self%scell(1)
+  end if
+  
+  self%ws_cell(2, counter) = mod(m2 + 1,self%scell(2))
+  if(self%ws_cell(2, counter) <= 0) then
+     self%ws_cell(2, counter) = self%ws_cell(2, counter) + self%scell(2)
+  end if
+
+  self%ws_cell(3, counter) = mod(m3 + 1,self%scell(3))
+  if(self%ws_cell(3, counter) <= 0) then
+     self%ws_cell(3, counter) = self%ws_cell(3, counter) + self%scell(3)
+  end if
+end if
+~~~
+   
 
 
 
@@ -365,9 +398,9 @@ with meaning while going through the script
 - `ibrav`: ???
 - `ipol`: temp `ifc2` tensor location index 1
 - `jpol`: temp `ifc2` tensor location index 2
-- `m1`: iterator for the number of supercells in the super-supercell
-- `m2`: iterator for the number of supercells in the super-supercell
-- `m3`: iterator for the number of supercells in the super-supercell
+- `m1`: iterator for the number of supercells positions in the ultracell
+- `m2`: iterator for the number of supercells positions in the ultracell
+- `m3`: iterator for the number of supercells positions in the ultracell
 - `ntype`: number of atomic species
 - `nat`: number of atoms in the basis
 - `nfc2`: number of force constants 3*3*`nat`*`nat`
