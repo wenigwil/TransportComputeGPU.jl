@@ -1,7 +1,24 @@
 # elphbolt-module-phonon
-
 This is a place for notes on the `phonon.f90` which is located at 
 `elphbolt/src/`.
+
+## Order of calls
+
+Here I just want to catch which subroutines are being called by the public 
+subroutine `initialize()`. I imagine this to be quite helpful when I 
+rebuild...
+
+**0.** Initialize quantities: number of bands, wave-vector mesh, number of 
+wave-vectors
+
+**1.** `read_ifc2()`
+
+**2.** `phonon_espresso_precompute()`
+
+**3.** `calculate_phonons()`
+
+**4.** `read_ifc3()`
+
 
 ## types
 
@@ -68,22 +85,247 @@ This is a place for notes on the `phonon.f90` which is located at
       unitcell (for 2 atoms in the unitcell this is of shape *2x2*x3)
 - **`ws_cell(:, :)`** *`array of integers`*
     - IMPORTANT: this is *easily* (bad naming) mistaken for `wscell(3)` 
-      which contains the numbers of unitcell in the supercell copied from 
-      the qe-ifc2-file!!! **This is something else!**
+      which contains the stretched unitcell lattice vectors **This is 
+      something else!**
+    - allocated with size `(3, product(num_ws_cells)*crys%nu atoms**2)` 
+      which is as if you save a vector of size equal to `ws_weights` in 
+      each column of `ws_cell`
     - takes part in the `dynmat`-symmetry restore process (`wsweights`)
 - **`ws_weight(:)`** *`array of floats`*
-    - contains the computed `weight` corresponding to each unitcell in the 
-      super-supercell
-    - length should be `5*5*5*wscell(1)*wscell(2)*wscell(3)` (big numba)
+    - contains the computed `weight` corresponding to each `r_ws(3)` (see 
+      `phonon_espresso_precompute()` for what `r_ws(3)` is)
+    - first I thought this is storing a weight for every unitcell in the 
+      ultracell, but it stores a weight for every atom pair combination for 
+      every unitcell position in the ultracell (there are 4 atom pair 
+      combinations if you got 2 atoms in the unitcell)
+    - allocated with length `product(num_ws_cells)*crys%numatoms**2`. 
+      `product(num_ws_cells)` is the number of all unitcell positions in 
+      the ultracell (check the definition of `num_ws_cells` at 
+      `phonon_espresso_precompute()`).
 
-## initialize
+## `initialize`
 
-This `subroutine` is said to initialize the phonon data type, calculate 
+This subroutine is said to initialize the phonon data type, calculate 
 *ground state* phonon properties and read ifc3 data.
+1. The subroutine begins with type declarations (?) of class-variables for 
+   the modules crystal, symmetry, numerics and wannier! So far so good. 
+  
+~~~fortran
+class(phonon), intent(out) :: self
+type(crystal), intent(in) :: crys
+type(symmetry), intent(in) :: sym
+type(numerics), intent(in) :: num
+type(wannier), intent(in), optional :: wann
+~~~
+
+2. Interestingly some variables are now defined that look like they are 
+   type inferred
+
+~~~fortran
+!Set phonon branches
+self%numbands = crys%numatoms*3
+!Set wave vector mesh
+self%wvmesh = num%qmesh
+!Set number of phonon wave vectors
+self%nwv = product(self%wvmesh(:))
+~~~
+
+Pretty self-explanatory what those variables mean, but why can you just 
+define them like that. Didn't every variable in fortran need to have an 
+explicitly defined type associated with itself?
+
+3. Checking whether to use ifc2s that stem from a Wannier calculation. If 
+   Wannier-calculated ifc2s should be used this is skipped.
+
+~~~fortran
+if(.not. num%use_Wannier_ifc2s) then
+   !Read ifc2 and related quantities
+   call read_ifc2(self, crys)
+
+   !Precompute dynamical matrix related quantities
+   call phonon_espresso_precompute(self, crys)
+end if
+~~~
+
+4. If wannier object is present, call `calculate_phonons()` with this 
+   `wann`-object. If not do not.
+
+~~~fortran
+if(present(wann)) then
+   call calculate_phonons(self, crys, sym, num, wann)
+else
+   call calculate_phonons(self, crys, sym, num)
+end if
+~~~
+
+5. Only do `read_ifc3()` if `num%onlyebte` is false and `num%runlevel` is 
+   3. 
+
+~~~fortran
+if(.not. num%onlyebte .and. num%runlevel /= 3) then
+   !Read ifc3s and related quantities
+   call read_ifc3(self, crys)
+end if
+~~~
+
+
+## `phonon_espresso_precompute`
+
+This subroutine will compute quantities for constructing the dynamical 
+matrix. These quantities do not need $\bar{q}$-vectors as input
+
+### Variables
+
+- **`i, j`** *`integer`*
+    - usually cartesian counting indeces
+- **`iat, jat`** *`integer`*
+    - dummies for looping through the number of atoms
+- **`m1 ,m2, m3`** *`integer`*
+    - dummies for looping through the number of unitcells in the 
+      super-supercell
+- **`num_ws_cell(3)`** *`integer`*
+    - `self%scell` has the *number of unitcells* that makes up a supercell 
+      in each lattice vector direction. `num_ws_cell(:) = 4*self%scell(:) + 
+      1` converts this to the number of positions of unitcells contained in 
+      the ultracell in each lattice vector direction
+    - number of vectors that point to unitcell origins
+    - example for a 6x6x6 supercell: for all `i` we have 
+      `num_ws_cell(i)=4*6+1`
+    - good name for the super-supercell would be **ultracell**
+    - **IMPORTANT** this is not to be confused with number of unitcells in 
+      the ultracell which would be just `4*self%scell(i)` for a given 
+      lattice vector direction `i`. This is the famous duality between the 
+      number of connections between points and the number of points.
+- **`counter`** *`integer`*
+    - Counter for the muxed unitcell positions inside the **ultracell**
+- **`ir`** *`integer`*
+    - Dummy for looping through the muxed supercell positions inside the 
+      ultracell analogous to `counter`
+- **`deg`** *`integer`*
+    - Counter for the "degeneracy" of how many voronoi planes a unitcell 
+      position  is an element of
+- **`distance`** *`float`*
+    - explicit value of the Hesse Normalform of the voronoi plane that is 
+      checked against, whether a point is on i) the side of the origin, ii) 
+      opposite side of the origin or iii) on the voronoi plane
+- **`weight`** *`float`*
+    - counter defined as the inverse unit-incremented `deg` (`1/(deg+1)`)
+- **`r_ws`** *`vector of floats`*
+    - vector that points to a unitcell inside the ultracell (see `t(3)`) 
+      but add the difference of two atoms `i` and `j` to it (see `rr(:,:)`)
+    - depending on the order of `i` and `j` this points somewhere between 
+      the atoms
+    - `r_ws` only exists temporary in each computation for one atom pair 
+      combination for one unitcell at a time and is overwritten every 
+      iteration of the loop it takes part in
+- **`t(3)`** *`vector of floats`*
+    - vector that points to one unitcell position inside the ultracell
+
+### Operations
+
+1. Initialize `ws_weight` and `ws_cell` (which has nothing to do with 
+   `wscell`)
+
+~~~fortran
+allocate(self%ws_weight(product(num_ws_cells)*crys%numatoms**2))
+allocate(self%ws_cell(3, product(num_ws_cells)*crys%numatoms**2))
+~~~
+
+2. Set all values (?) of `ws_weight` and `ws_cell` to zero as well as 
+   `counter`
+
+~~~fortran
+self%ws_weight = 0
+self%ws_cell = 0.0_r64
+counter = 0
+~~~
+
+3. Set up loops for dummies `iat, jat, m1, m2, m3` and *wire in* `counter`
+
+~~~fortran
+do iat = 1, crys%numatoms
+   do jat = 1, crys%numatoms
+      do m1 = -2*self%scell(1), 2*self%scell(1)
+         do m2 = -2*self%scell(2), 2*self%scell(2)
+            do m3 = -2*self%scell(3), 2*self%scell(3)
+               counter = counter + 1
+~~~
+
+4. Compute the values for `r_ws(3)`. `r_ws` is a temporary variable which 
+   is only consistent with itself inside one loop iteration.
+
+~~~fortran
+do i = 1, 3
+  t(i) = m1*self%cell_r(1, i) + m2*self%cell_r(2, i) + 
+  m3*self%cell_r(3, i)
+  r_ws(i) = t(i) + self%rr(iat, jat, i)
+end do
+~~~
+
+5. This part is mostly identical to a function found at Quantum Espresso is 
+   `PW/src/wsweights.f90`. The current `r_ws(3)` is checked against postion 
+   relative to a voronoi (wigner-seitz) plane between the origin and `rws` 
+   (which is the position of a supercell inside the ultracell). `distance` 
+   equates to the plane condition with three cases checked corresponding to 
+   the 3 regions the plane is dividing the space into (Nullset included). 
+   
+    - Case i) `distance > 0` which means `r_ws` is on the side of the plane 
+      that `rws` points towards (opposite of the origin).
+    - Case ii) `abs(distance) < 1.0e-6_r64` which mean that `distance` is 
+      close to 0. `r_ws` most certainly very close or on the plane.
+    - Case iii) `distance < 0` which means that the point `r_ws` is not on 
+      the plane but on the side of the origin.
+
+    In Case i) `weight` will stay 0 but `j=1` (`j` is just for sorting out 
+    this case). For Case ii) the number `deg = deg + 1` and `weight = 
+    1/deg` (this weight will be added to `ws_weight` which is the total 
+    weight corresponding to a particular atom pair combination and unitcell 
+    in the ultracell). In the *hidden* Case iii) `j` will stay 0 and 
+    `deg=1` such that `weight=1`.
+
+~~~fortran
+weight = 0.0_r64
+deg = 1
+j = 0
+do ir = 1, 124
+  distance = dot_product(r_ws, self%rws(ir, 1:3)) - self%rws(ir, 0)
+  if(distance > 1.0e-6_r64) then
+     j = 1
+     cycle
+  end if
+  if(abs(distance) < 1.0e-6_r64) then
+     deg = deg + 1
+  end if
+end do
+
+if(j == 0) then
+  weight = 1.0_r64/dble(deg)
+end if
+~~~
+
+6. The specifics about the `mod(A,P)` function are 
+   [here](https://gcc.gnu.org/onlinedocs/gfortran/MOD.html). The 
+   `mod`-function in Fortran is basically returning `A-int(A/P)*P` where 
+   `int(A/P)` is [**rounding towards 
+   zero**](https://en.wikipedia.org/wiki/Rounding#Rounding_toward_zero) 
+   (mathematically
+   $\mathrm{trunc}(x) = \mathrm{sgn}(x) \lfloor | x | \rfloor$). 
+   `mod`-functions in every programming language are subject to 
+   implementation which is due to the freedom of convention. In Fortran the 
+   `mod`-function is not implemented *clock-like*. A clock-like 
+   `mod`-function will always return values between `0` and `P`, whereas 
+   Fortrans `mod-function` will return values between `-P` and `P`, which 
+   will be symmetric about the sign of `A`. This implementation fuses the 
+   functionality of a regular clock and a clock that counts *negative* time 
+   but still displays the same numbers after each period as the regular 
+   clock. This is practical because we want to wrap vectors back into a 
+   cell (at symmetric around an origin) for which their components not need 
+   to be positive. The dummy variables `m1, m2, m3` are non-cartesian 
+   postions of unitcells in the a ultracell. `self%scell` is a copy from 
+   the ifc2-file of the number of unit cells in a supercell. 
 
 
 
-## phonon_espresso_precompute
 
 ## phonon_espresso
 
