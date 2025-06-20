@@ -332,9 +332,10 @@ self%ws_weight(counter) = self%ws_weight(counter) + weight
    clock-like modulo with an if-statement below that adds (`mod(A,P)`) `P` 
    in the case for `A<=0`.
 
-   For some intellectual reason we shift Fortrans `mod`-function here on 
-   never fold back into the origin unitcell. This will probably clear up in 
-   the `phonon_espresso_precompute()`-subroutine.
+   For some intellectual reason we shift Fortrans `mod`-function by `1` 
+   (e.g. `mod(m1 + 1, self%scell(1))`). This causes the new vector for each 
+   `r_ws` to never fold back into the origin unitcell. This will probably 
+   clear up in the `phonon_espresso()`-subroutine.
 
 
 ~~~fortran
@@ -356,15 +357,150 @@ if(weight > 0.0_r64) then
 end if
 ~~~
    
+## `phonon_espresso`
+
+This subroutine is called by the `calculate_phonons()`-subroutine which 
+calls `phonon_espresso()` *after* `phonon_espresso_precompute`.
+
+### Variables
+
+- **`nq`** *`integer`*
+    - probably the number of qpoints
+    - this is passed as an argument of `phonon_espresso`
+- **`qpoints(nq,3)`** *`vector of floats`*
+    - probably the for which the dynamical matrix is constructed
+- **`omegas(nq, self%numbands)`** *`matrix of floats`*
+    - frequencies calculated from the dynamical matrix
+- **`velocities(nq, self%numbands, 3)`** *`array of floats`*
+    - phonon group velocities calculated from the eigenvectors (?)
+- **`eigenvect(nq, self%numbands, self%numbands)`** *`array of complex`*
+    - eigenvectors obtained from diagonalization of dynamical matrix
+    - this is an argument of `phonon_espresso` because the container has to 
+      be passed into which the solutions are wrote
+- **`toTHz=20670.687_r64`** *`float`*
+    - NOT the conversion from energy in `Ry=13.605 eV`
+    - the ifc2-file of quantum espresso was given in a Rydberg energy scale 
+      and so are the eigenvectors computed from the formed dynamical matrix 
+      (probably...). When the velocities are formed `toTHz` is used to 
+      convert them into `km/s` but I dont know how yet.
+- **`counter`** *`integer`*
+    - muxes the specific `r_ws` into a number
+- **`ntype=crys%numelements`** *`integer`*
+    - number of species
+- **`nat`** *`integer`*
+    - number of atoms in a unitcell
+- **`nbranches=3*nat`** *`integer`*
+    - number of solutions to the equation of motion for one q point
+- **`i, j`** *`integer`*
+    - DESCRIPTION
+- **`ipol, jpol`** *`integer`*
+    - dummies that go through the atom displacement cartesian index of the 
+      `self%ifc2`.
+- **`iat, jat`** *`integer`*
+    - just as usual the dummies that go from 1 to every atom number until 
+      `nat`
+- **`idim, jdim`** *`integer`*
+    - encodes the type of atom **into** the structure of the dynamical 
+      matrix. Usually in theory the dynamical matrix is an 
+      `nat`x`nat`-matrix for every q-point. A field of matrices. But here 
+      it is a big `3*nat`x`3*nat`-matrix, which is also apparent from the 
+      definition of `ndim` and the allocation of `dyn_s`
+- **`t1, t2, t3`** *`integer`*
+    - components of the newly mapped `r_ws` vector at a specific `counter`.
+- **`m1, m2, m3`** *`integer`* usual dummies for running through all unitcell positions
+- **`iq`** *`integer`*
+    - dummy for running from 1 to the number of qpoints `nq`
+- **`ndim = 3*nat`** *`integer`*
+    - the dynamical matrix will be of shape `ndim`x`ndim`
+- **`nwork`** *`integer`*
+    - something technical related to the `zheev()` diagonalization...
+- **`ncell_g(3)`** *`vector of integers`*
+    - related to the nonanalytic correction of the dynamical matrix
+- **`total_weight`** *`float`*
+    - it is not used somehow. Just set to `0`
+- **`weight`** *`float`*
+    - copied from `self%ws_weight(counter)` which is the weight assigned to 
+      a particular `r_ws`
+- **`alpha`** *`float`*
+    - related to the nonanalytic correction of the dynamical matrix
+- **`geg`** *`float`*
+    - related to the nonanalytic correction of the dynamical matrix
+- **`gmax`** *`float`*
+    - related to the nonanalytic correction of the dynamical matrix
+- **`qt`** *`real`*
+    - temp for the dot-product of a qpoint with the vector saved by 
+      `t1,t2,t3`
+- **`t(0:3)`** *`vector of floats`*
+    - cartesian unitcell positions
+- **`omega2(:)`** *`vector of floats`*
+    - phonon frequency squared. Is allocated with length of `nbranches`
+- **`rwork(:)`** *`vector of floats`*
+    - something technical related to the `zheev`-diagonalization
+- **`q`** *`matrix of floats`*
+    - matrix of qpoints in the cartesian basis of the reciprocal lattice 
+      vectors
+    - units are converted from 1/nm to 1/bohr by *multiplying* with 
+      `bohr2nm`
+- **`vels`** *`array of floats`*
+    - don't know yet. Apparently passed also appears in 
+      `calculate_phonons()`
+- **`eigenvectors`** *`matrix of complex`*
+    - probably eigenvectors from `zheev` (?)
+- **`work`** *`array of complex`*
+    - technical, don't know yet
+- **`dyn(:,:)`** *`array of complex`*
+    - muxed dynamical matrix with long and short range parts
+- **`dyn_s(:,:,:)`** *`array of complex`*
+    - short range part of `dyn(:,:)`
+- **`dyn_l(:,:,:)`** *`array of complex`*
+    - long range part of `dyn(:,:)`
+- **`ddyn(:,:,:)`** *`array of complex`*
+    - don't know yet
+- **`ddyn_s(:,:,:,:)`** *`array of complex`*
+    - don't know yet
+- **`ddyn_l(:,:,:,:)`** *`array of complex`*
+    - don't know yet
+
+### Operations
+
+I'm not going to list the allocations of the variables.
+
+1. copy some necessary quantities
+
+~~~fortran
+nwork = 1
+ntype = crys%numelements
+nat = crys%numatoms
+ndim = 3*nat
+~~~
+
+2. This is already hinted at in the definition for the matrix `q(:,:)` 
+   above. The `qpoints` are transformed into cartesian coordinates using 
+   the reciprocal lattice vectors `crys%reclattvecs` and converted to units 
+   of 1/bohr from 1/nm.
+>[!WARNING]
+> `volume_r` is defined and set but never used lol
+
+~~~fortran
+do iq = 1, nq
+   q(iq, :) = matmul(crys%reclattvecs, qpoints(iq, :))
+end do
+q = q*bohr2nm
+volume_r = crys%volume/bohr2nm**3
+~~~
+
+3. Some technical things regarding the non-analytical correction are 
+   happening
+
+~~~fortran
+gmax = 14.0_r64
+alpha = (twopi*bohr2nm/dnrm2(3, crys%lattvecs(:,1), 1))**2
+geg = gmax*4.0_r64*alpha
+ncell_g = int(sqrt(geg)/self%cell_g(:, 0)) + 1
+~~~
 
 
 
-
-## phonon_espresso
-
-
-
-## calculate_phonons
 
 
 ## read_ifc2
@@ -403,7 +539,7 @@ with meaning while going through the script
 - `m3`: iterator for the number of supercells positions in the ultracell
 - `ntype`: number of atomic species
 - `nat`: number of atoms in the basis
-- `nfc2`: number of force constants 3*3*`nat`*`nat`
+- `nfc2`: number of force constants `3*3*nat*nat`
 
 #### 64 bit floating
 
