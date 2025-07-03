@@ -382,9 +382,9 @@ struct dfpt_qeOutputData
         celldm[5],
         celldm[6] = parse.(Float64, split(readline(output_file)))
         # Convert to Ints so we can loop over them
-        ntype = convert(Int16, ntype)
-        nat = convert(Int16, nat)
-        ibrav = convert(Int16, ibrav)
+        ntype = convert(Int64, ntype)
+        nat = convert(Int64, nat)
+        ibrav = convert(Int64, ibrav)
 
         Logging.@debug "readifc2() First line read..." nat ntype ibrav celldm
 
@@ -403,16 +403,19 @@ struct dfpt_qeOutputData
             mass[i] = parse(Float64, temp[3])
         end
 
+        # Convert the masses from the Rydberg-ian unitsystem used in 
+        # Quantum-Espresso into *relative atomic mass*
+
         Logging.@debug "readifc2() Next $ntype line(s) read..." mass label
 
         # NEXT nat LINE(S)
         # From these lines we get which species (tipo) sits on which basis 
         # position (basis_pos)
-        tipo = Vector{Int16}(undef, nat)
+        tipo = Vector{Int64}(undef, nat)
         basis_pos = Matrix{Float64}(undef, (nat, 3))
         for i = 1:nat
             temp = split(readline(output_file))
-            tipo[i] = parse(Int16, temp[2])
+            tipo[i] = parse(Int64, temp[2])
             basis_pos[i, :] = parse.(Float64, temp[3:end])
         end
 
@@ -493,13 +496,13 @@ struct dfpt_qeOutputData
         properties = Dict{String,Any}()
 
         # Assign the read-in data to the properties dictionary
-        properties["numelements"] = ntype
-        properties["numatoms"] = nat
+        properties["numspecies"] = ntype
+        properties["numbasisatoms"] = nat
         properties["ibrav"] = ibrav
         properties["celldm"] = celldm
-        properties["masses"] = mass
-        properties["label"] = label
-        properties["tipo"] = tipo
+        properties["species2masses"] = mass
+        properties["species"] = label
+        properties["basisatom2species"] = tipo
         properties["basis"] = basis_pos
         properties["polar"] = polar_key
         properties["epsilon"] = dielectric_tensor

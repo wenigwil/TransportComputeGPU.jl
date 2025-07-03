@@ -523,7 +523,7 @@ with meaning while going through the script
 #### 64 bit integers
 
 - `qscell(3)`: qgrid used in the DFPT calculation
-- `tipo(crys%numatoms)`: ???
+- `tipo(crys%numatoms)`: vector which holds the species type for each atom
 - `t1`: temp `ifc2` tensor location index 5
 - `t2`: temp `ifc2` tensor location index 6
 - `t3`: temp `ifc2` tensor location index 7
